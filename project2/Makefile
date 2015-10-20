@@ -1,4 +1,4 @@
-CC = g++
+CC = g++ -std=c++0x
 COPTS = -g -Wall -Wno-deprecated
 LKOPTS = 
 

@@ -3,6 +3,7 @@
 
 #include "RoutingProtocol.h"
 #include "Node.h"
+#include <unordered_map>
 
 class RoutingProtocolImpl : public RoutingProtocol {
   public:
@@ -38,6 +39,8 @@ class RoutingProtocolImpl : public RoutingProtocol {
 
  private:
     Node *sys; // To store Node object; used to access GSR9999 interfaces 
+    unordered_map<unsigned short, unsigned short> id_port_map;
+    unordered_map<unsigned short, unsigned int> id_dist_map;
     unsigned short num_dif_ports;
     unsigned short my_id;
     eProtocolType my_protocol_type;

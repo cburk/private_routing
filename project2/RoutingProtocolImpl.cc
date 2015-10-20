@@ -29,14 +29,9 @@ void RoutingProtocolImpl::init(unsigned short num_ports, unsigned short router_i
   my_id = router_id;
   my_protocol_type = protocol_type;
 
-  // Initial action on each port, TODO: does this need to send initial pings, set alerts?
-  //for(int i = 0; i < num_ports; i ++)
-  //  id_port_map[i] = INFINITY_COST;
-
   // Set the ping alarm that goes off every 10 seconds
   char *ping_d = (char *) malloc(5);
   strcpy(ping_d, "ping");
-
   sys->set_alarm(this, 10000, ping_d);
 
   // Set any other alarms
@@ -57,9 +52,10 @@ void RoutingProtocolImpl::handle_alarm(void *data) {
 
       ret->head = *pp_head;
       ret->payload = sys->time();
+      printf("\n\nsending payload: %i, stored at %p \n\n", ret->payload, &(ret->payload));
 
       //send it
-      sys->send(i, ret, 12);
+      sys->send(i, ret, 16);
     }
 
     // Set the next alarm
@@ -80,7 +76,6 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
   switch(pack_header->packet_type)
   {
     case DATA:{
-      printf("Router %i received a data packet\n", my_id);
       // If the packet was destined for us, free it as it's now useless
       if ( *((unsigned short *) pack_header->dest_id) == my_id){
         free(packet);
@@ -91,6 +86,7 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
         unsigned short newport = 0;
         sys->send(newport, packet, size);
       }
+
       break;
     }
     case PING:{
@@ -107,9 +103,9 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
       pp_head->dest_id = ping->head.source_id;
 
       ret->head = *pp_head;
-      ret->payload = sys->time();
+      ret->payload = ping->payload;
 
-      sys->send(port, ret, 12);
+      sys->send(port, ret, 16); //should prob be sizeof pp
 
       //free received ping message, since we're done with it
       free(ping);
@@ -117,6 +113,28 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
       break;
     }
     case PONG:{
+      pingpong_packet *pong = (pingpong_packet *) packet;
+
+      printf("Pong message broken down: %i!!!%i\n", sizeof(struct pingpong_packet), sizeof(struct packet_header));
+      printf("type: pong \n");
+      printf("reserved ignored\n");
+      printf("Size: %i\n", pong->head.size);
+      printf("Source: %i\n", pong->head.source_id);
+      printf("Dest: %i\n", pong->head.dest_id);
+      printf("Payload: %i\n", pong->payload);
+
+      // compute the time it took to reach other end of port
+      unsigned int time_dif = sys->time() - pong->payload;
+
+      // update relevant mappings
+      id_dist_map[pong->head.source_id] = time_dif;
+      id_port_map[pong->head.source_id] = port;
+      printf("\n\nReceived payload: %i at loc: %p \n", pong->payload, &(pong->payload));
+      printf("Setting cost of %i at time %i\n\n", time_dif, sys->time());
+
+      //free received pong message, since we're done with it
+      free(pong);
+
       break;
     }
     case DV:{
