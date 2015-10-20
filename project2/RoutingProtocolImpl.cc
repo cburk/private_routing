@@ -1,6 +1,7 @@
 #include "RoutingProtocolImpl.h"
 #include "global.h"
 #include <string.h>
+#include <unordered_map>
 
 struct packet_header {
   ePacketType packet_type;
@@ -14,6 +15,12 @@ struct pingpong_packet {
   packet_header head;
   unsigned int payload;
 };
+
+bool map_contains(std::unordered_map<unsigned short, unsigned short> m, unsigned short key){
+  if(m.find(key) == m.end())
+    return false;
+  return true;
+}
 
 RoutingProtocolImpl::RoutingProtocolImpl(Node *n) : RoutingProtocol(n) {
   sys = n;
@@ -52,7 +59,6 @@ void RoutingProtocolImpl::handle_alarm(void *data) {
 
       ret->head = *pp_head;
       ret->payload = sys->time();
-      printf("\n\nsending payload: %i, stored at %p \n\n", ret->payload, &(ret->payload));
 
       //send it
       sys->send(i, ret, 16);
@@ -76,15 +82,22 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
   switch(pack_header->packet_type)
   {
     case DATA:{
+      unsigned short destination = pack_header->dest_id;
+
       // If the packet was destined for us, free it as it's now useless
-      if ( *((unsigned short *) pack_header->dest_id) == my_id){
+      if (destination == my_id){
         free(packet);
       }
       // Otherwise route it to where it needs to go
       else{
-        //TODO: determine correct port to send on
-        unsigned short newport = 0;
-        sys->send(newport, packet, size);
+        // If we know where to send it:
+        if(map_contains(id_port_map, destination))
+          sys->send(id_port_map[destination], packet, size);
+        // Else flood it?  TODO: determine if flooding is correct behavior here
+        else
+          for(int i = 0; i < num_dif_ports; i++)
+            if(i != port)
+              sys->send(i, packet, size);
       }
 
       break;
@@ -115,6 +128,7 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
     case PONG:{
       pingpong_packet *pong = (pingpong_packet *) packet;
 
+      /*
       printf("Pong message broken down: %i!!!%i\n", sizeof(struct pingpong_packet), sizeof(struct packet_header));
       printf("type: pong \n");
       printf("reserved ignored\n");
@@ -122,15 +136,27 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
       printf("Source: %i\n", pong->head.source_id);
       printf("Dest: %i\n", pong->head.dest_id);
       printf("Payload: %i\n", pong->payload);
+      */
 
       // compute the time it took to reach other end of port
       unsigned int time_dif = sys->time() - pong->payload;
 
-      // update relevant mappings
-      id_dist_map[pong->head.source_id] = time_dif;
-      id_port_map[pong->head.source_id] = port;
-      printf("\n\nReceived payload: %i at loc: %p \n", pong->payload, &(pong->payload));
-      printf("Setting cost of %i at time %i\n\n", time_dif, sys->time());
+      /* update relevant mappings */
+      unsigned short sender = pong->head.source_id;
+
+      // If neighbor's cost changes, change cost (and possibly route) of ALL paths
+      // through that port
+      if(map_contains(neighbors_port_map, sender) && id_port_map[sender] != time_dif){
+        //TODO: code to update all routes through a port/neighbor
+    
+      }
+      // Otherwise (if cost is unchanged or neighbor not seen before) just reset
+      // neighbor's cost      
+      else{
+        id_dist_map[sender] = time_dif;
+        id_port_map[sender] = port;
+        neighbors_port_map[sender] = port;
+      }
 
       //free received pong message, since we're done with it
       free(pong);
@@ -147,4 +173,3 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
   }
 }
 
-// add more of your own code
