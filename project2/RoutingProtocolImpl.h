@@ -39,9 +39,10 @@ class RoutingProtocolImpl : public RoutingProtocol {
 
  private:
     Node *sys; // To store Node object; used to access GSR9999 interfaces 
-    unordered_map<unsigned short, unsigned short> id_port_map;
+    unordered_map<unsigned short, unsigned short> id_port_map; //keys: ids, vals: the ports we route shortest path to ID's through
     unordered_map<unsigned short, unsigned int> id_dist_map;
     unordered_map<unsigned short, unsigned short> neighbors_port_map;
+    unordered_map<unsigned short, unsigned short> id_updated_map; //how many seconds ago each id was updated
     unsigned short num_dif_ports;
     unsigned short my_id;
     eProtocolType my_protocol_type;
