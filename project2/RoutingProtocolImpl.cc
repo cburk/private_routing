@@ -33,6 +33,12 @@ bool map_contains(std::unordered_map<unsigned short, unsigned short> m, unsigned
   return true;
 }
 
+bool map_contains(std::unordered_map<unsigned short, unsigned int> m, unsigned short key){
+  if(m.find(key) == m.end())
+    return false;
+  return true;
+}
+
 RoutingProtocolImpl::RoutingProtocolImpl(Node *n) : RoutingProtocol(n) {
   sys = n;
   // add your own code
@@ -212,6 +218,60 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
       break;
     }
     case DV:{
+      //given: size and port
+      packet_header *pack = (packet_header *)packet;
+      unsigned int sender = pack->source_id;
+      unsigned int dest;
+
+      int changed = 0; //TODO: in function, check if any distance entries have changed.
+      //IF so, flood DV updates
+
+      dv_entry *entry = (dv_entry *)(pack + 1);
+      // Make sure we have the most recent distance from our node to sender
+      for(int i = sizeof(struct packet_header); i < size; i += sizeof(struct dv_entry)){
+        dest = entry->dest_id;
+        
+        // Info about ourselves is processed differently
+        if(dest == my_id){
+          id_updated_map[sender] = 0; //0 seconds since last update
+
+          // If we haven't seen sender before, or it's at a new distance away:
+          if(!map_contains(id_dist_map, sender) || (id_dist_map[sender] != entry->cost) ){
+            changed = 1;
+
+            neighbors_port_map[sender] = port;
+            id_port_map[sender] = port;
+            id_dist_map[sender] = entry->cost;
+
+            // TODO: Like in pong, all shortest paths through sender need to be updated.
+          }
+        }
+      }
+      // Go through and update everyone else's distance
+      for(int i = sizeof(struct packet_header); i < size; i += sizeof(struct dv_entry)){
+        dest = entry->dest_id;
+    
+        if(dest != my_id) {
+          id_updated_map[dest] = 0;
+          // If the path through sender is shorter or we've never
+          // seen dest before, update
+          if((map_contains(id_port_map, dest) && id_dist_map[dest] > id_dist_map[sender] + entry->cost) || !map_contains(id_port_map, dest)){
+            changed = 1;
+            id_dist_map[dest] = id_dist_map[sender] + entry->cost;
+            id_port_map[dest] = port;
+          }
+        }
+        entry ++;
+      }
+
+      // If some entry has changed, we need to flood DV updates
+      if(changed)
+        for(auto it = neighbors_port_map.begin(); it != neighbors_port_map.end(); ++it)
+          send_dv_update(my_id, it->first, neighbors_port_map[it->first],
+            id_port_map, id_dist_map, neighbors_port_map, sys);
+        
+
+      free(packet);
       break;
     }
     case LS:{
