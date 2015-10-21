@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unordered_map>
 
+/* Sends a dv_update message from router from to router to on port on_port */
 void send_dv_update(unsigned short from, unsigned short to, unsigned short on_port,
     unordered_map<unsigned short, unsigned short> id_port_map, 
     unordered_map<unsigned short, unsigned int> id_dist_map,
@@ -26,6 +27,16 @@ struct dv_entry {
   unsigned short dest_id;
   unsigned short cost;
 };
+
+/* Changes the length of all paths through port by change */
+void update_all_through(unsigned short port, int change,
+    unordered_map<unsigned short, unsigned int> id_dist_map,
+    unordered_map<unsigned short, unsigned short> id_port_map) {
+  for (auto it = id_port_map.begin(); it != id_port_map.end(); ++it) {
+    if (port == it->second)
+      id_dist_map[it->first] = id_dist_map[it->first] + change;
+  }
+}
 
 bool map_contains(std::unordered_map<unsigned short, unsigned short> m, unsigned short key){
   if(m.find(key) == m.end())
@@ -98,7 +109,7 @@ void RoutingProtocolImpl::handle_alarm(void *data) {
     // Reset the alarm that sends dv_updates every 30 seconds
     char *dvup_d = (char *) malloc(5);
     strcpy(dvup_d, "dvup");
-    sys->set_alarm(this, 30000, dvup_d);    
+    sys->set_alarm(this, 30000, dvup_d);
   } 
 
   // handle ping alarm
@@ -184,6 +195,8 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
     }
     case PONG:{
       pingpong_packet *pong = (pingpong_packet *) packet;
+      int changed = 0; // Keeps track of if any paths have changed, to know whether to dv update or not
+      int change = 0;
 
       /* Debugging, easily print a pong message */
       /*
@@ -202,15 +215,23 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
 
       /* update relevant mappings */
       id_updated_map[sender] = 0;
-      id_dist_map[sender] = time_dif;
+      if(!map_contains(id_dist_map, sender) or id_dist_map[sender] != time_dif){
+        changed = 1;
+        change = time_dif - id_dist_map[sender];
+        id_dist_map[sender] = time_dif;
+      }
       id_port_map[sender] = port;
       neighbors_port_map[sender] = port;
 
-      // If neighbor's cost changes, change cost (and possibly route) of ALL paths
-      // through that port
-      //TODO: code to update all routes through a port/neighbor
-
-      //TODO: If any costs changed at all, should trigger a dv update flood
+      // If neighbor's cost has changed, we need to flood DV updates and change cost
+      // of ALL paths through that port
+      if(changed){
+        for(auto it = neighbors_port_map.begin(); it != neighbors_port_map.end(); ++it){
+          send_dv_update(my_id, it->first, neighbors_port_map[it->first],
+            id_port_map, id_dist_map, neighbors_port_map, sys);
+        }
+        update_all_through(port, change, id_dist_map, id_port_map);
+      }
 
       //free received pong message, since we're done with it
       free(packet);
@@ -223,8 +244,8 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
       unsigned int sender = pack->source_id;
       unsigned int dest;
 
-      int changed = 0; //TODO: in function, check if any distance entries have changed.
-      //IF so, flood DV updates
+      int changed = 0;
+      int change = 0;
 
       dv_entry *entry = (dv_entry *)(pack + 1);
       // Make sure we have the most recent distance from our node to sender
@@ -238,12 +259,14 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
           // If we haven't seen sender before, or it's at a new distance away:
           if(!map_contains(id_dist_map, sender) || (id_dist_map[sender] != entry->cost) ){
             changed = 1;
+            change = entry->cost - id_dist_map[sender];
 
             neighbors_port_map[sender] = port;
             id_port_map[sender] = port;
             id_dist_map[sender] = entry->cost;
 
-            // TODO: Like in pong, all shortest paths through sender need to be updated.
+            // Like in pong, all shortest paths through sender need to be updated.
+            update_all_through(port, change, id_dist_map, id_port_map);
           }
         }
       }
