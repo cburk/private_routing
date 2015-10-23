@@ -117,6 +117,8 @@ void RoutingProtocolImpl::handle_alarm(void *data) {
         // If this unresponsive node is our neighbor, set all paths through it to inf cost
         if(map_contains(neighbors_port_map, it->first))
           update_all_through(neighbors_port_map[it->first], INFINITY_COST, it->first, id_dist_map, id_port_map);
+
+        printf("\n\n!!!TIMEOUT!!! %i setting cost to %i to INF!!!\n\n\n", my_id, it->first);
       }
     }
 
@@ -256,7 +258,10 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
 
       /* update relevant mappings */
       id_updated_map[sender] = 0;
-      if(!map_contains(id_dist_map, sender) or id_dist_map[sender] != time_dif){
+      
+      /* ONLY CHANGE IF COST < WHAT WE'VE GOT! otherwise overwrites shorter routes through other nodes*/
+      /* Possible concern: what if link is severed on other end?  Addressed by freshness check, will set to inf if necessary */
+      if(!map_contains(id_dist_map, sender) or time_dif < id_dist_map[sender]){
         //printf("Changed b/c either doesn't contain?: %i or map entry %i != t_d %i\n", !map_contains(id_dist_map, sender), id_dist_map[sender], time_dif);
         changed = 1;
         change = time_dif - id_dist_map[sender];
@@ -271,11 +276,13 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
         update_all_through(port, change, sender, id_dist_map, id_port_map);
 
         for(auto it = neighbors_port_map.begin(); it != neighbors_port_map.end(); ++it){
-          //printf("Before glibc\n"); fflush(stdout);
-          //printf("id dist map: "); print_map(id_dist_map);
-          //printf("id port map: "); print_map(id_port_map);
-          //printf("neighbors port map: "); print_map(neighbors_port_map);
-          //fflush(stdout);
+          if(my_id == 1){
+            printf("Before we send to: %i\n", it->first); fflush(stdout);
+            printf("id dist map: "); print_map(id_dist_map);
+            printf("id port map: "); print_map(id_port_map);
+            printf("neighbors port map: "); print_map(neighbors_port_map);
+          }
+
           send_dv_update(my_id, it->first, neighbors_port_map[it->first]);
           //printf("After glibc\n"); fflush(stdout);
         }
@@ -299,8 +306,10 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
 
       /* Debugging info, print a DV packet */
       bool debug = true;
-      debug = false;
-      if(debug){printf("Recv'd dv pack: \nSender: %i\n", sender); fflush(stdout);};
+      //debug = false;
+      //if(debug){printf("Recv'd dv pack: \nSender: %i\n", sender); fflush(stdout);};
+      printf("Map before: (i'm %i, recving from %i) \n", my_id, sender);
+      print_map(id_dist_map);
 
       dv_entry *entry = (dv_entry *)(pack + 1);
       
@@ -327,11 +336,15 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
 
       // If some entry has changed, we need to flood DV updates
       if(changed)
-        for(auto it = neighbors_port_map.begin(); it != neighbors_port_map.end(); ++it)
-          //send_dv_update(my_id, it->first, neighbors_port_map[it->first],
-          //    id_port_map, id_dist_map, neighbors_port_map, sys);
+        for(auto it = neighbors_port_map.begin(); it != neighbors_port_map.end(); ++it){
+          //if(my_id == 1){
+          //  printf("Sending dv from 1 to %i\n", it->first);
+          //}
           send_dv_update(my_id, it->first, neighbors_port_map[it->first]);
-        
+        }
+
+      printf("Map after: \n");
+      print_map(id_dist_map);
 
       free(packet);
       break;
