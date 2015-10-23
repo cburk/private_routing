@@ -40,6 +40,8 @@ class RoutingProtocolImpl : public RoutingProtocol {
     void send_dv_update(unsigned short from, unsigned short to, unsigned short on_port);
 
     void reverse_header(void *packet_header);
+   
+    void update_all_through(unsigned short port, int changed, unsigned short except);
 
  private:
     Node *sys; // To store Node object; used to access GSR9999 interfaces 
