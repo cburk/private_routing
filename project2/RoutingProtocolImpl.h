@@ -37,6 +37,8 @@ class RoutingProtocolImpl : public RoutingProtocol {
     // that the packet is generated locally and not received from 
     // a neighbor router.
 
+    void send_dv_update(unsigned short from, unsigned short to, unsigned short on_port);
+
  private:
     Node *sys; // To store Node object; used to access GSR9999 interfaces 
     unordered_map<unsigned short, unsigned short> id_port_map; //keys: ids, vals: the ports we route shortest path to ID's through
