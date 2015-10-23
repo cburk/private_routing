@@ -124,8 +124,9 @@ void RoutingProtocolImpl::handle_alarm(void *data) {
     // If an entry changed as a result of timeout, flood dv updates
     if(changed)
       for(auto it = neighbors_port_map.begin(); it != neighbors_port_map.end(); ++it){
-        send_dv_update(my_id, it->first, neighbors_port_map[it->first],
-          id_port_map, id_dist_map, neighbors_port_map, sys);
+        //send_dv_update(my_id, it->first, neighbors_port_map[it->first],
+        //  id_port_map, id_dist_map, neighbors_port_map, sys);
+        send_dv_update(my_id, it->first, neighbors_port_map[it->first]);
       }
 
     // Reset the freshness check that occurs every second
@@ -139,8 +140,9 @@ void RoutingProtocolImpl::handle_alarm(void *data) {
     //printf("periodic dv update alarm\n");
     // Send all neighbors an update
     for(auto it = neighbors_port_map.begin(); it != neighbors_port_map.end(); ++it){
-      send_dv_update(my_id, it->first, neighbors_port_map[it->first],
-        id_port_map, id_dist_map, neighbors_port_map, sys);
+      //send_dv_update(my_id, it->first, neighbors_port_map[it->first],
+      //  id_port_map, id_dist_map, neighbors_port_map, sys);
+      send_dv_update(my_id, it->first, neighbors_port_map[it->first]);
     }
     // Reset the alarm that sends dv_updates every 30 seconds
     char *dvup_d = (char *) malloc(5);
@@ -203,11 +205,7 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
         // If we know where to send it:
         if(map_contains(id_port_map, destination))
           sys->send(id_port_map[destination], packet, size);
-        // Else flood it?  TODO: determine if flooding is correct behavior here
-        else
-          for(int i = 0; i < num_dif_ports; i++)
-            if(i != port)
-              sys->send(i, packet, size);
+        // Else ignore it?
       }
 
       break;
@@ -272,9 +270,15 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
         update_all_through(port, change, sender, id_dist_map, id_port_map);
 
         for(auto it = neighbors_port_map.begin(); it != neighbors_port_map.end(); ++it){
-          send_dv_update(my_id, it->first, neighbors_port_map[it->first],
-            id_port_map, id_dist_map, neighbors_port_map, sys);
+          printf("Before glibc\n"); fflush(stdout);
+          printf("id dist map: "); print_map(id_dist_map);
+          printf("id port map: "); print_map(id_port_map);
+          printf("neighbors port map: "); print_map(neighbors_port_map);
+          fflush(stdout);
+          send_dv_update(my_id, it->first, neighbors_port_map[it->first]);
+          printf("After glibc\n"); fflush(stdout);
         }
+
 
       }
 
@@ -323,8 +327,9 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
       // If some entry has changed, we need to flood DV updates
       if(changed)
         for(auto it = neighbors_port_map.begin(); it != neighbors_port_map.end(); ++it)
-          send_dv_update(my_id, it->first, neighbors_port_map[it->first],
-              id_port_map, id_dist_map, neighbors_port_map, sys);
+          //send_dv_update(my_id, it->first, neighbors_port_map[it->first],
+          //    id_port_map, id_dist_map, neighbors_port_map, sys);
+          send_dv_update(my_id, it->first, neighbors_port_map[it->first]);
         
 
       free(packet);
@@ -344,11 +349,11 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
  *
  * Returns the number of entries in the body
  */
-void send_dv_update(unsigned short from, unsigned short to, unsigned short on_port,
-    unordered_map<unsigned short, unsigned short> id_port_map, 
-    unordered_map<unsigned short, unsigned int> id_dist_map,
-    unordered_map<unsigned short, unsigned short> neighbors_port_map,
-    Node *sys){
+void RoutingProtocolImpl::send_dv_update(unsigned short from, unsigned short to, unsigned short on_port){
+    //unordered_map<unsigned short, unsigned short> id_port_map, 
+    //unordered_map<unsigned short, unsigned int> id_dist_map,
+    //unordered_map<unsigned short, unsigned short> neighbors_port_map,
+    //Node *sys){
 
 
   //Determine size of message to send
@@ -381,8 +386,11 @@ void send_dv_update(unsigned short from, unsigned short to, unsigned short on_po
       else{
         cur_dv->cost = id_dist_map[it->first];
       }
+  
       // Advance cur_dv to space where next entry should start
-      cur_dv += sizeof(struct dv_entry);
+      // TODO: Does this advance the pointer too much?  Should it just be ++?
+      //cur_dv += sizeof(struct dv_entry);
+      cur_dv ++;
     }
   }
 
