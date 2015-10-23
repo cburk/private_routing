@@ -1,0 +1,29 @@
+Testing Strategy:
+
+Components:
+
+  1. A lot of our component testing was focused on our helper functions.  The most
+important of these is send_dv_update, which takes some parameters and sends a fully
+formed dv_update message to the specified recipient.  We tested this function and our
+code in the ping alert with a simple check on the receiving end that cast the
+received message to its type and printed out the components, ensuring they were all
+still in the correct order, position, the size was correct, etc.
+
+  The helper function update_all_through (which changes the recorded length
+of all paths through a given port on a router by a certain amount) was tested by
+comparing the length of paths before the call to lengths after the call.  We would
+ensure that only the paths that went through that port were affected.
+
+  To test that the alarms were working properly, after determining which type of
+alarm it was, we printed out a message saying the type.  Then we ran a
+sufficiently long test and ensured that the alarm messages were printing out
+at the proper intervals.
+
+  
+
+System:
+
+  1. Made use of simpletests1-3 and their sample outputs by ensuring that the
+outputs were similar to those created by our solution, and by printing out the
+routing tables at important moments (i.e. links going up and down, at the beginning
+and end) to ensure that the results matched our expectations.
