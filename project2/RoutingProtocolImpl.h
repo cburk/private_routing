@@ -38,17 +38,39 @@ class RoutingProtocolImpl : public RoutingProtocol {
     // a neighbor router.
 
     void send_dv_update(unsigned short from, unsigned short to, unsigned short on_port);
+    // Sends a dv_update message from router "from" to router "to" on port "on_port"
 
     void reverse_header(void *packet_header);
-   
+    // Reverses the byte order of the components in the packet_header passed to it
+
     void update_all_through(unsigned short port, int changed, unsigned short except);
+    // Changes the length of all paths through port by change, does not
+    // change the distance for paths to except_for (useful if, for example, 
+    // except_for the caller's neighbor and it's distance could have already been updated)
+ 
 
  private:
     Node *sys; // To store Node object; used to access GSR9999 interfaces 
-    unordered_map<unsigned short, unsigned short> id_port_map; //keys: ids, vals: the ports we route shortest path to ID's through
+    /**  
+     * The keys are discovered nodes, the values are the ports that the current shortest
+     * path to those nodes goes through.
+     */
+    unordered_map<unsigned short, unsigned short> id_port_map;
+    /**
+     * The keys are the ids of discovered nodes, the values are the lengths of the 
+     * shortest path to those nodes, measured in ms/roundtrip
+     */
     unordered_map<unsigned short, unsigned int> id_dist_map;
+    /**
+     * The keys are the ids of neighbors, the values are the port that router
+     * lies across
+     */
     unordered_map<unsigned short, unsigned short> neighbors_port_map;
-    unordered_map<unsigned short, unsigned short> id_updated_map; //how many seconds ago each id was updated
+    /**
+     * The keys are the ids of discovered nodes, the values are the time
+     * in seconds since the current router got information about that node
+     */
+    unordered_map<unsigned short, unsigned short> id_updated_map;
     unsigned short num_dif_ports;
     unsigned short my_id;
     eProtocolType my_protocol_type;

@@ -6,7 +6,7 @@
 #include <arpa/inet.h>
 #include <unordered_map>
 
-/* Sends a dv_update message from router from to router to on port on_port */
+/* Sends a dv_update message from router "from" to router "to" on port "on_port" */
 void send_dv_update(unsigned short from, unsigned short to, unsigned short on_port,
     unordered_map<unsigned short, unsigned short> id_port_map, 
     unordered_map<unsigned short, unsigned int> id_dist_map,
@@ -466,6 +466,7 @@ void RoutingProtocolImpl::send_dv_update(unsigned short from, unsigned short to,
   sys->send(on_port, pack, size);
 }
 
+/* Reverses a packet_header passed to it */
 void RoutingProtocolImpl::reverse_header(void *packet_header){
   struct packet_header *h = (struct packet_header *) packet_header;
   h->packet_type = (ePacketType) ntohs(h->packet_type) & 0xff00; //the short used to store packet type includes memory that's reserved.  Ignore it w/ bitmask
