@@ -12,8 +12,7 @@ void send_dv_update(unsigned short from, unsigned short to, unsigned short on_po
     Node *sys);
 
 struct packet_header {
-  ePacketType packet_type;
-  char reserved;
+  unsigned short packet_type; //includes reserved, has to be &'d w/ 0xff00 to get actual type
   unsigned short size;
   unsigned short source_id;
   unsigned short dest_id;
@@ -90,7 +89,7 @@ void RoutingProtocolImpl::init(unsigned short num_ports, unsigned short router_i
   // Set the ping alarm that goes off every 10 seconds
   char *ping_d = (char *) malloc(5);
   strcpy(ping_d, "ping");
-  sys->set_alarm(this, 10000, ping_d);
+  sys->set_alarm(this, 0, ping_d);
 
   // Set the freshness check that occurs every second
   char *fresh_d = (char *) malloc(6);
@@ -118,6 +117,8 @@ void RoutingProtocolImpl::handle_alarm(void *data) {
         // If this unresponsive node is our neighbor, set all paths through it to inf cost
         if(map_contains(neighbors_port_map, it->first))
           update_all_through(neighbors_port_map[it->first], INFINITY_COST, it->first, id_dist_map, id_port_map);
+
+        printf("\n\n!!!TIMEOUT!!! %i setting cost to %i to INF!!!\n\n\n", my_id, it->first);
       }
     }
 
@@ -185,16 +186,18 @@ void RoutingProtocolImpl::handle_alarm(void *data) {
 void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short size) {
   packet_header *pack_header = (packet_header *) packet;
 
+//  if(port == 0xffff || ntohs(pack_header->packet_type == DATA)){
   if(port == 0xffff){
     //printf("need to reverse data packet\n");
-    pack_header->packet_type = (ePacketType) htons(pack_header->packet_type);
+    //pack_header->packet_type = (ePacketType) htons(pack_header->packet_type);
+    reverse_header(pack_header);
   }
 
   switch(pack_header->packet_type)
   {
     case DATA:{
       unsigned short destination = pack_header->dest_id;
-      //printf("\n\nData to %i!!\n\n", destination);
+      //printf("\n\nData to %i from %i (size %i)!!\n\n", destination, pack_header->source_id, pack_header->size);
 
       // If the packet was destined for us, free it as it's now useless
       if (destination == my_id){
@@ -255,8 +258,11 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
 
       /* update relevant mappings */
       id_updated_map[sender] = 0;
-      if(!map_contains(id_dist_map, sender) or id_dist_map[sender] != time_dif){
-        printf("Changed b/c either doesn't contain?: %i or map entry %i != t_d %i\n", !map_contains(id_dist_map, sender), id_dist_map[sender], time_dif);
+      
+      /* ONLY CHANGE IF COST < WHAT WE'VE GOT! otherwise overwrites shorter routes through other nodes*/
+      /* Possible concern: what if link is severed on other end?  Addressed by freshness check, will set to inf if necessary */
+      if(!map_contains(id_dist_map, sender) or time_dif < id_dist_map[sender]){
+        //printf("Changed b/c either doesn't contain?: %i or map entry %i != t_d %i\n", !map_contains(id_dist_map, sender), id_dist_map[sender], time_dif);
         changed = 1;
         change = time_dif - id_dist_map[sender];
         id_dist_map[sender] = time_dif;
@@ -270,13 +276,15 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
         update_all_through(port, change, sender, id_dist_map, id_port_map);
 
         for(auto it = neighbors_port_map.begin(); it != neighbors_port_map.end(); ++it){
-          printf("Before glibc\n"); fflush(stdout);
-          printf("id dist map: "); print_map(id_dist_map);
-          printf("id port map: "); print_map(id_port_map);
-          printf("neighbors port map: "); print_map(neighbors_port_map);
-          fflush(stdout);
+          if(my_id == 1){
+            printf("Before we send to: %i\n", it->first); fflush(stdout);
+            printf("id dist map: "); print_map(id_dist_map);
+            printf("id port map: "); print_map(id_port_map);
+            printf("neighbors port map: "); print_map(neighbors_port_map);
+          }
+
           send_dv_update(my_id, it->first, neighbors_port_map[it->first]);
-          printf("After glibc\n"); fflush(stdout);
+          //printf("After glibc\n"); fflush(stdout);
         }
 
 
@@ -298,8 +306,10 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
 
       /* Debugging info, print a DV packet */
       bool debug = true;
-      debug = false;
-      if(debug){printf("Recv'd dv pack: \nSender: %i\n", sender); fflush(stdout);};
+      //debug = false;
+      //if(debug){printf("Recv'd dv pack: \nSender: %i\n", sender); fflush(stdout);};
+      printf("Map before: (i'm %i, recving from %i) \n", my_id, sender);
+      print_map(id_dist_map);
 
       dv_entry *entry = (dv_entry *)(pack + 1);
       
@@ -326,11 +336,15 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
 
       // If some entry has changed, we need to flood DV updates
       if(changed)
-        for(auto it = neighbors_port_map.begin(); it != neighbors_port_map.end(); ++it)
-          //send_dv_update(my_id, it->first, neighbors_port_map[it->first],
-          //    id_port_map, id_dist_map, neighbors_port_map, sys);
+        for(auto it = neighbors_port_map.begin(); it != neighbors_port_map.end(); ++it){
+          //if(my_id == 1){
+          //  printf("Sending dv from 1 to %i\n", it->first);
+          //}
           send_dv_update(my_id, it->first, neighbors_port_map[it->first]);
-        
+        }
+
+      printf("Map after: \n");
+      print_map(id_dist_map);
 
       free(packet);
       break;
@@ -416,3 +430,10 @@ void RoutingProtocolImpl::send_dv_update(unsigned short from, unsigned short to,
   sys->send(on_port, pack, size);
 }
 
+void RoutingProtocolImpl::reverse_header(void *packet_header){
+  struct packet_header *h = (struct packet_header *) packet_header;
+  h->packet_type = (ePacketType) ntohs(h->packet_type) & 0xff00; //the short used to store packet type includes memory that's reserved.  Ignore it w/ bitmask
+  h->size = ntohs(h->size);
+  h->source_id = ntohs(h->source_id);
+  h->dest_id = ntohs(h->dest_id);
+}
