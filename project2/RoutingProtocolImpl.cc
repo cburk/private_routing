@@ -1,10 +1,12 @@
 #include "RoutingProtocolImpl.h"
 #include "global.h"
 #include <string.h>
+#include <math.h>
+#include <set>
 #include <arpa/inet.h>
 #include <unordered_map>
 
-/* Sends a dv_update message from router from to router to on port on_port */
+/* Sends a dv_update message from router "from" to router "to" on port "on_port" */
 void send_dv_update(unsigned short from, unsigned short to, unsigned short on_port,
     unordered_map<unsigned short, unsigned short> id_port_map, 
     unordered_map<unsigned short, unsigned int> id_dist_map,
@@ -47,13 +49,12 @@ void print_map(unordered_map<unsigned short, unsigned int> mymap){
  * change the dist for except_for, for example, this could be the neighbor and
  * it's distance could have already been updated
  */
-void update_all_through(unsigned short port, int change, unsigned short except_for,
-    unordered_map<unsigned short, unsigned int> id_dist_map,
-    unordered_map<unsigned short, unsigned short> id_port_map) {
+void RoutingProtocolImpl::update_all_through(unsigned short port, int change, unsigned short except_for){
   for (auto it = id_port_map.begin(); it != id_port_map.end(); ++it) {
     if (port == it->second and it->first != except_for){
-      if (change == INFINITY_COST)
+      if (change == INFINITY_COST){
         id_dist_map[it->first] = INFINITY_COST;
+      }
       else
         id_dist_map[it->first] = id_dist_map[it->first] + change;
     }
@@ -109,26 +110,30 @@ void RoutingProtocolImpl::handle_alarm(void *data) {
   if(strcmp((char *) data, "fresh") == 0){
     bool changed = false;
     //printf("freshness check alarm\n");
-    for(auto it = id_dist_map.begin(); it != id_dist_map.end(); ++it){
+    for(auto it = id_updated_map.begin(); it != id_updated_map.end(); ++it){
       id_updated_map[it->first] = id_updated_map[it->first] + 1;
       if(id_updated_map[it->first] >= 45){
-        id_dist_map[it->first] = INFINITY_COST;
-        changed = true;
+        //Only set cost to INFINITY if our shortest path is directly through this
+        if(id_port_map[it->first] == neighbors_port_map[it->first] && id_dist_map[it->first] != INFINITY_COST){
+          id_dist_map[it->first] = INFINITY_COST;
+          changed = true;
+          //printf("\n\n!!!TIMEOUT!!! %i setting cost to %i to INF!!!\n\n\n", my_id, it->first);
+        }
         // If this unresponsive node is our neighbor, set all paths through it to inf cost
-        if(map_contains(neighbors_port_map, it->first))
-          update_all_through(neighbors_port_map[it->first], INFINITY_COST, it->first, id_dist_map, id_port_map);
-
-        printf("\n\n!!!TIMEOUT!!! %i setting cost to %i to INF!!!\n\n\n", my_id, it->first);
+        if(map_contains(neighbors_port_map, it->first)){
+          //printf("Updating all of %i's paths through the port to %i (which is %i)\n", my_id, it->first, neighbors_port_map[it->first]);
+          update_all_through(neighbors_port_map[it->first], INFINITY_COST, it->first);
+        }
       }
     }
 
     // If an entry changed as a result of timeout, flood dv updates
-    if(changed)
+    if(changed){
       for(auto it = neighbors_port_map.begin(); it != neighbors_port_map.end(); ++it){
-        //send_dv_update(my_id, it->first, neighbors_port_map[it->first],
-        //  id_port_map, id_dist_map, neighbors_port_map, sys);
+        //printf("b/c of timeout, sending update to %i thru %i\n", it->first, neighbors_port_map[it->first]);
         send_dv_update(my_id, it->first, neighbors_port_map[it->first]);
       }
+    }
 
     // Reset the freshness check that occurs every second
     char *fresh_d = (char *) malloc(6);
@@ -154,15 +159,18 @@ void RoutingProtocolImpl::handle_alarm(void *data) {
   // handle ping alarm
   if(strcmp((char *) data, "ping") == 0){
     //printf("periodic ping alarm\n");
+    //for(unsigned short i = 0; i < num_dif_ports; i ++){
     for(unsigned short i = 0; i < num_dif_ports; i ++){
       //create the PING packet to send
       pingpong_packet *ret = (pingpong_packet *) malloc(sizeof(struct pingpong_packet));
       packet_header *pp_head = &(ret->head);
 
       pp_head->packet_type = PING;
+
       //size is the base 8 bytes + 4 for payload
-      pp_head->size = 12;
-      pp_head->source_id = my_id;
+      pp_head->size = htons(16);
+      pp_head->source_id = htons(my_id);
+      pp_head->dest_id = htons(i);
 
       ret->head = *pp_head;
       ret->payload = sys->time();
@@ -186,12 +194,9 @@ void RoutingProtocolImpl::handle_alarm(void *data) {
 void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short size) {
   packet_header *pack_header = (packet_header *) packet;
 
-//  if(port == 0xffff || ntohs(pack_header->packet_type == DATA)){
-  if(port == 0xffff){
-    //printf("need to reverse data packet\n");
-    //pack_header->packet_type = (ePacketType) htons(pack_header->packet_type);
     reverse_header(pack_header);
-  }
+    if(port == 0xffff)
+      pack_header->packet_type = (ePacketType) ntohs(pack_header->packet_type) & 0xff00;
 
   switch(pack_header->packet_type)
   {
@@ -214,6 +219,8 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
       break;
     }
     case PING:{
+      //printf("pingin\n");
+
       pingpong_packet *ping = (pingpong_packet *) packet;
 
       // Just send a pong to the source w/ the same timestamp
@@ -221,10 +228,9 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
       packet_header *pp_head = &(ret->head);
 
       pp_head->packet_type = PONG;
-      //size is the base 8 bytes + 4 for payload
-      pp_head->size = 12;
-      pp_head->source_id = my_id;
-      pp_head->dest_id = ping->head.source_id;
+      pp_head->size = htons(16);
+      pp_head->source_id = htons(my_id);
+      pp_head->dest_id = htons(ping->head.source_id);
 
       ret->head = *pp_head;
       ret->payload = ping->payload;
@@ -266,28 +272,18 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
         changed = 1;
         change = time_dif - id_dist_map[sender];
         id_dist_map[sender] = time_dif;
+        id_port_map[sender] = port;
       }
-      id_port_map[sender] = port;
       neighbors_port_map[sender] = port;
 
       // If neighbor's cost has changed, we need to flood DV updates and change cost
       // of ALL paths through that port
       if(changed){
-        update_all_through(port, change, sender, id_dist_map, id_port_map);
+        update_all_through(port, change, sender);
 
         for(auto it = neighbors_port_map.begin(); it != neighbors_port_map.end(); ++it){
-          if(my_id == 1){
-            printf("Before we send to: %i\n", it->first); fflush(stdout);
-            printf("id dist map: "); print_map(id_dist_map);
-            printf("id port map: "); print_map(id_port_map);
-            printf("neighbors port map: "); print_map(neighbors_port_map);
-          }
-
           send_dv_update(my_id, it->first, neighbors_port_map[it->first]);
-          //printf("After glibc\n"); fflush(stdout);
         }
-
-
       }
 
       //free received pong message, since we're done with it
@@ -302,28 +298,36 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
       unsigned int dest;
 
       int changed = 0;
-      //int change = 0;
-
-      /* Debugging info, print a DV packet */
-      bool debug = true;
-      //debug = false;
-      //if(debug){printf("Recv'd dv pack: \nSender: %i\n", sender); fflush(stdout);};
-      printf("Map before: (i'm %i, recving from %i) \n", my_id, sender);
-      print_map(id_dist_map);
 
       dv_entry *entry = (dv_entry *)(pack + 1);
+
+      //printf("Map @ %i before: \n", my_id);
+      //print_map(id_dist_map);
       
+      // seen is a set of ids we saw distances for in this dv up.  If we have a path
+      // routing through port (i.e. going through sender) that isn't seen, we need
+      // to set the new dist to infinity (as it was inf for sender, so they ommitted it)  
+      std::set<unsigned short> seen;
+
       // Go through and update everyone else's distance
       for(int i = sizeof(struct packet_header); i < size; i += sizeof(struct dv_entry)){
-        dest = entry->dest_id;
-    
+        dest = ntohs(entry->dest_id);
+        entry->cost = ntohs(entry->cost);
+
         if(dest != my_id) {
-          if(debug){printf("id: %i, cost: %i\n", dest, entry->cost);fflush(stdout);}
-  
-          id_updated_map[dest] = 0;
-          // If the path through sender is shorter or we've never
-          // seen dest before, update
-          if((map_contains(id_port_map, dest) && id_dist_map[dest] > id_dist_map[sender] + entry->cost && entry->cost != INFINITY_COST) || !map_contains(id_port_map, dest)){
+          seen.insert(dest);
+          
+          // If the path through sender is shorter (1) or we've never
+          // seen dest before (2)
+          // OR our old shortest path to dest is through sender and cost has 
+          // changed at all (3), update
+          bool prop_one = (map_contains(id_port_map, dest) &&
+            (id_dist_map[dest] > id_dist_map[sender] + entry->cost && entry->cost != INFINITY_COST)
+          );
+          bool prop_two = (!map_contains(id_port_map, dest));
+          //TODO: Is prop_three useful w/ addition of seen set?
+          bool prop_three = (map_contains(id_port_map, dest) && id_port_map[dest] == port && id_dist_map[dest] != id_dist_map[sender] + entry->cost);
+          if(prop_one || prop_two || prop_three) {
             changed = 1;
             id_dist_map[dest] = id_dist_map[sender] + entry->cost;
             id_port_map[dest] = port;
@@ -334,17 +338,26 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
         entry ++;
       }
 
+      for(auto it = id_port_map.begin(); it != id_port_map.end(); ++it){
+        unsigned short dest = it->first;
+        //If our shortest path is through sender but sender didn't send us a dv update
+        //for it, its cost is infinity
+        if(dest != sender && seen.find(dest) == seen.end() && id_port_map[dest] == port){
+          if(id_dist_map[dest] != INFINITY_COST){
+            id_dist_map[dest] = INFINITY_COST;
+            changed = true;
+          }
+        }
+      }
+
       // If some entry has changed, we need to flood DV updates
       if(changed)
         for(auto it = neighbors_port_map.begin(); it != neighbors_port_map.end(); ++it){
-          //if(my_id == 1){
-          //  printf("Sending dv from 1 to %i\n", it->first);
-          //}
           send_dv_update(my_id, it->first, neighbors_port_map[it->first]);
         }
 
-      printf("Map after: \n");
-      print_map(id_dist_map);
+      //printf("Map @ %i after: \n", my_id);
+      //print_map(id_dist_map);
 
       free(packet);
       break;
@@ -369,6 +382,7 @@ void RoutingProtocolImpl::send_dv_update(unsigned short from, unsigned short to,
     //unordered_map<unsigned short, unsigned short> neighbors_port_map,
     //Node *sys){
 
+  //printf("Here in s_d_v, should be sending dv up from %i to %i\n", from, to);
 
   //Determine size of message to send
   int size = sizeof(struct packet_header); //Size must include header size
@@ -378,9 +392,9 @@ void RoutingProtocolImpl::send_dv_update(unsigned short from, unsigned short to,
 
   packet_header *pack = (packet_header *) malloc(size);
   pack->packet_type = DV;
-  pack->size = size;
-  pack->source_id = from;
-  pack->dest_id = to;
+  pack->size = htons(size);
+  pack->source_id = htons(from);
+  pack->dest_id = htons(to);
 
   pack ++; //Move pointer to end of header
   dv_entry *cur_dv = (dv_entry *) pack; //Put first dv entry at end of header
@@ -389,7 +403,7 @@ void RoutingProtocolImpl::send_dv_update(unsigned short from, unsigned short to,
     // Only add entries whose costs are < infinity (or dest if < inf originally)
     if (id_dist_map[it->first] != INFINITY_COST){
 
-      cur_dv->dest_id = it->first;
+      cur_dv->dest_id = htons(it->first);
 
       // If our shortest path first routes through to, cost = inf (poison reverse)
       // In other words, if to is our neighbor and (we route to to and this iterations id through the same port)
@@ -398,12 +412,10 @@ void RoutingProtocolImpl::send_dv_update(unsigned short from, unsigned short to,
       }
       // Otherwise, fill in entry as usual
       else{
-        cur_dv->cost = id_dist_map[it->first];
+        cur_dv->cost = htons(id_dist_map[it->first]);
       }
   
       // Advance cur_dv to space where next entry should start
-      // TODO: Does this advance the pointer too much?  Should it just be ++?
-      //cur_dv += sizeof(struct dv_entry);
       cur_dv ++;
     }
   }
@@ -413,6 +425,7 @@ void RoutingProtocolImpl::send_dv_update(unsigned short from, unsigned short to,
 
   /* For debugging, if you wanna see what an update packet being sent looks like */
   /*
+  {
   printf("Sending out dv update that looks like: \n");
   printf("Header info: \n");
   
@@ -425,14 +438,16 @@ void RoutingProtocolImpl::send_dv_update(unsigned short from, unsigned short to,
       printf("Update Entry %i: ID: %i, Cost: %i\n", i, entry->dest_id, entry->cost);
     entry ++;
   }
+  }
   */
 
   sys->send(on_port, pack, size);
 }
 
+/* Reverses a packet_header passed to it */
 void RoutingProtocolImpl::reverse_header(void *packet_header){
   struct packet_header *h = (struct packet_header *) packet_header;
-  h->packet_type = (ePacketType) ntohs(h->packet_type) & 0xff00; //the short used to store packet type includes memory that's reserved.  Ignore it w/ bitmask
+  
   h->size = ntohs(h->size);
   h->source_id = ntohs(h->source_id);
   h->dest_id = ntohs(h->dest_id);
