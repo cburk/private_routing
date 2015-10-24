@@ -325,7 +325,6 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
             (id_dist_map[dest] > id_dist_map[sender] + entry->cost && entry->cost != INFINITY_COST)
           );
           bool prop_two = (!map_contains(id_port_map, dest));
-          //TODO: Is prop_three useful w/ addition of seen set?
           bool prop_three = (map_contains(id_port_map, dest) && id_port_map[dest] == port && id_dist_map[dest] != id_dist_map[sender] + entry->cost);
           if(prop_one || prop_two || prop_three) {
             changed = 1;
@@ -333,7 +332,6 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
             id_port_map[dest] = port;
           }
 
-          //TODO: Should there be some kind of update_all_through call here?
         }
         entry ++;
       }
