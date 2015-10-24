@@ -28,14 +28,15 @@ outputs were similar to those created by our solution, and by printing out the
 routing tables at important moments (i.e. links going up and down, at the beginning
 and end) to ensure that the results matched our expectations.
 
-  2. We created and ran our own tests based on the simpletest format.  Two were 
+  2. We created and ran our own tests based on the simpletest format.  Two sets were 
 significantly larger networks (10 nodes, ~2 connections each) with a number of
-disconnects.  In one they were arranged in a ring topology, in another they were
-in two smaller clumps connected by one link.  It was infeasible except in the last
-case to check that the routing tables were correct in all stages, so we checked
-that immediately after severing connections nodes weren't able to reach each other,
-and used data packet transmissions to be able to see at a glance that what nodes
-remained connected were able to properly route packets.  In all cases we of course
-ensured that the simulation ran to completion.
+disconnects.  In one they were arranged in a ring topology (bigringtest and bigringremov), 
+in another they were in two smaller clumps connected by one link (bigclumps and
+bigclumpsremov).  
+  It was infeasible to check that the routing tables were correct in all stages, 
+so we checked that immediately after severing connections nodes weren't able to reach each
+other, and used data packet transmissions to be able to see at a glance that what 
+nodes remained connected were able to properly route packets.  In all cases we of 
+course ensured that the simulation ran to completion.
 
   3. We used valgrind to test the simulation for memory leaks.
