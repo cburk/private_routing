@@ -202,7 +202,8 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
   {
     case DATA:{
       unsigned short destination = pack_header->dest_id;
-      //printf("\n\nData to %i from %i (size %i)!!\n\n", destination, pack_header->source_id, pack_header->size);
+      printf("\n\nData to %i from %i (size %i)!!\n\n", destination, pack_header->source_id, pack_header->size);
+      print_map(id_dist_map);
 
       // If the packet was destined for us, free it as it's now useless
       if (destination == my_id){
@@ -211,8 +212,10 @@ void RoutingProtocolImpl::recv(unsigned short port, void *packet, unsigned short
       // Otherwise route it to where it needs to go
       else{
         // If we know where to send it:
-        if(map_contains(id_port_map, destination))
+        if(map_contains(id_port_map, destination)){
+          reverse_header(pack_header);
           sys->send(id_port_map[destination], packet, size);
+        }
         // Else ignore it?
       }
 
